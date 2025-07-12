@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snapwords</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Firebase CDN instead of imports -->
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-analytics-compat.js"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&family=Fredoka:wght@400;600&family=Comfortaa:wght@400;700&display=swap">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Custom CSS */
+        .tile {
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            cursor: grab;
+            user-select: none;
+        }
+        .tile.dragging {
+            transform: scale(1.1) rotate(5deg);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+            cursor: grabbing;
+        }
+        .drop-area {
+            min-height: 80px;
+            transition: all 0.3s ease;
+        }
+        .drop-area.active {
+            background-color: rgba(109, 40, 217, 0.2);
+            transform: scale(1.02);
+        }
+        .notification {
+            animation: slideDown 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+        }
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        @keyframes shake {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            50% { transform: translateX(10px); }
+            75% { transform: translateX(-10px); }
+            100% { transform: translateX(0); }
+        }
+        @keyframes slideDown {
+            from { transform: translateY(-100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes rotateIn {
+            from { transform: rotate(-15deg) scale(0.8); opacity: 0; }
+            to { transform: rotate(0) scale(1); opacity: 1; }
+        }
+        @keyframes rotateOut {
+            from { transform: rotate(0) scale(1); opacity: 1; }
+            to { transform: rotate(-15deg) scale(0.8); opacity: 0; }
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        /* Theme colors */
+        .theme-default-light {
+            background: linear-gradient(135deg, #774598, #7958e3);
+            color: #1e293b;
+        }
+        .theme-default-dark {
+            background: linear-gradient(135deg, #4c1d95, #6d28d9);
+            color: #f8fafc;
+        }
+        .theme-ocean-light { background: linear-gradient(135deg, #1286c0, #24b8f2); }
+        .theme-ocean-dark { background: linear-gradient(135deg, #0369a1, #0ea5e9); }
+        .theme-forest-light { background: linear-gradient(135deg, #249b4e, #166e38); }
+        .theme-forest-dark { background: linear-gradient(135deg, #166534, #22c55e); }
+        .theme-pink-light { background: linear-gradient(135deg, #ed7abc, #f789c7); }
+        .theme-pink-dark { background: linear-gradient(135deg, #831843, #ec4899); }
+        .theme-purple-light { background: linear-gradient(135deg, #8263a3, #c89bf8); }
+        .theme-purple-dark { background: linear-gradient(135deg, #5b21b6, #a855f7); }
+        .theme-gradient-light { background: linear-gradient(135deg, #34257a, #e0aa20, #097429); }
+        .theme-gradient-dark { background: linear-gradient(135deg, #362c9c, #b07209, #0c845c); }
+        
+        /* Modern leaderboard */
+        .leaderboard-entry {
+            animation: fadeIn 0.5s ease forwards;
+            animation-delay: calc(var(--index) * 0.1s);
+            opacity: 0;
+        }
+        
+        .leaderboard-rank {
+            background: linear-gradient(135deg, #7c3aed, #a78bfa);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+        
+        /* Center logo */
+        .header-center {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+        }
+        
+        /* Popup center */
+        .popup-center {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+        
+        /* Glass effect */
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        .glass-effect-dark {
+            background: rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        /* Settings panel animation */
+        .settings-panel {
+            transform-origin: top right;
+            animation: rotateIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        
+        /* Dark mode toggle animation */
+        .dark-mode-toggle {
+            transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+        .dark-mode-toggle:hover {
+            transform: scale(1.1) rotate(10deg);
+        }
+        
+        /* Button animations */
+        .btn-pop {
+            transition: all 0.2s ease;
+        }
+        .btn-pop:hover {
+            transform: translateY(-2px);
+        }
+        .btn-pop:active {
+            transform: translateY(1px);
+        }
+        
+        /* Toggle switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            background-color: #7c3aed;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #a78bfa;
+        }
+        #letterTiles {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(3rem, 1fr));
+            gap: 0.75rem;
+            overflow-y: auto;
+            max-height: 300px;
+            padding: 0.5rem;
+        }
+        
+        /* Sign In/Up Popup Styles */
+        .tab-active {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .tab-inactive {
+            background-color: #e5e7eb;
+            color: #4b5563;
+        }
+
+        /* Add these new transition styles */
+        .auth-content {
+            position: absolute;
+            width: 100%;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            opacity: 0;
+            transform: translateX(100%);
+        }
+        .auth-content.active {
+            opacity: 1;
+            transform: translateX(0);
+            position: relative;
+        }
+        .auth-content.inactive-left {
+            transform: translateX(-100%);
+        }
+
+        /* Profile Popup Styles */
+        #profilePopup {
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+        }
+        .dark #profilePopup {
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .avatar-initial {
+            font-weight: 600;
+            user-select: none;
+        }
+        /* Modern button hover effects */
+        #changePasswordBtn:hover {
+            transform: translateX(2px);
+            transition: all 0.2s ease;
+        }
+        #signOutBtn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 10px -3px rgba(239, 68, 68, 0.3);
+            transition: all 0.2s ease;
+        }
+        #signOutBtn:active {
+            transform: translateY(0);
+        }
+
+        .input-focus:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        .error-message {
+            color: #ef4444;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+        .modal-container {
+            opacity: 0;
+            transform: scale(0.9);
+            transition: all 0.3s ease-out;
+        }
+        .modal-container.show {
+            opacity: 1;
+            transform: scale(1);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col theme-default-dark bg-cover bg-center font-poppins transition-all duration-300">
+    <!-- Sign In/Up Popup -->
+    <div id="authModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div style="height:80vh"class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl overflow-hidden w-full max-w-md relative">
+            <!-- Close Button -->
+            <button id="closeAuthModal" class="absolute top-4 right-4 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+            
+            <!-- Tabs -->
+            <div class="flex">
+                <button id="signInTab" class="tab-active flex-1 py-4 font-medium text-center rounded-tl-xl transition-colors duration-300">
+                    Sign In
+                </button>
+                <button id="signUpTab" class="tab-inactive flex-1 py-4 font-medium text-center rounded-tr-xl transition-colors duration-300">
+                    Sign Up
+                </button>
+            </div>
+            
+            <!-- Content Container -->
+            <div class="relative overflow-hidden h-[500px]">
+                <!-- Sign In Form -->
+                <div id="signInContent" class="auth-content active p-8">
+                    <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-6">Welcome Back!</h2>
+                    
+                    <form>
+                        <div class="mb-4">
+                            <label for="signInEmail" class="block text-gray-700 dark:text-gray-300 mb-2">Email</label>
+                            <input type="email" id="signInEmail" class="w-full px-4 py-3 border border-gray-300 rounded-xl input-focus focus:outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="your@email.com">
+                        </div>
+                        
+                        <div class="mb-6 relative">
+                            <label for="signInPassword" class="block text-gray-700 dark:text-gray-300 mb-2">Password</label>
+                            <input type="password" id="signInPassword" class="w-full px-4 py-3 border border-gray-300 rounded-xl input-focus focus:outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="••••••••">
+                            <button type="button" class="absolute right-3 top-10 text-gray-500 hover:text-gray-700" id="toggleSignInPassword">
+                                <i class="far fa-eye"></i>
+                            </button>
+                        </div>
+                        
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-xl mb-4 transition-colors duration-300">
+                            Sign In
+                        </button>
+                        
+                        <div class="flex items-center mb-6">
+                            <div class="flex-1 border-t border-gray-300"></div>
+                            <span class="px-3 text-gray-500">or</span>
+                            <div class="flex-1 border-t border-gray-300"></div>
+                        </div>
+                        
+                       <html>
+  <body>
+    <script src="https://accounts.google.com/gsi/client" async></script>
+    <div id="g_id_onload"
+        data-client_id=" snapwords-8e289"
+        data-login_uri="https://snapwords.com/your_login_endpoint"
+        data-auto_prompt="false">
+    </div>
+    <div class="g_id_signin"
+        data-type="standard"
+        data-size="large"
+        data-theme="outline"
+        data-text="sign_in_with"
+        data-shape="rectangular"
+        data-logo_alignment="left">
+    </div>
+  <body>
+</html>
+                        
+                        <button type="button" id="skipAuthBtn" class="w-full text-indigo-600 hover:text-indigo-700 font-medium py-2 rounded-xl transition-colors duration-300 dark:text-indigo-400 dark:hover:text-indigo-300">
+                            Skip for now
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Sign Up Form -->
+                <div id="signUpContent" class="auth-content p-8">
+                    <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-6">Join Us!</h2>
+                    
+                    <form>
+                        <div class="mb-4">
+                            <label for="signUpEmail" class="block text-gray-700 dark:text-gray-300 mb-2">Email</label>
+                            <input type="email" id="signUpEmail" class="w-full px-4 py-3 border border-gray-300 rounded-xl input-focus focus:outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="your@email.com">
+                        </div>
+                        
+                        <div class="mb-6 relative">
+                            <label for="signUpPassword" class="block text-gray-700 dark:text-gray-300 mb-2">Password</label>
+                            <input type="password" id="signUpPassword" class="w-full px-4 py-3 border border-gray-300 rounded-xl input-focus focus:outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="••••••••">
+                            <button type="button" class="absolute right-3 top-10 text-gray-500 hover:text-gray-700" id="toggleSignUpPassword">
+                                <i class="far fa-eye"></i>
+                            </button>
+                        </div>
+                        
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-xl mb-4 transition-colors duration-300">
+                            Sign Up
+                        </button>
+                        
+                        <div class="flex items-center mb-6">
+                            <div class="flex-1 border-t border-gray-300"></div>
+                            <span class="px-3 text-gray-500">or</span>
+                            <div class="flex-1 border-t border-gray-300"></div>
+                        </div>
+                        
+                      <html>
+  <body>
+    <script src="https://accounts.google.com/gsi/client" async></script>
+    <div id="g_id_onload"
+        data-client_id=" snapwords-8e289"
+        data-login_uri="https://snapwords.com/your_login_endpoint"
+        data-auto_prompt="false">
+    </div>
+    <div class="g_id_signin"
+        data-type="standard"
+        data-size="large"
+        data-theme="outline"
+        data-text="sign_in_with"
+        data-shape="rectangular"
+        data-logo_alignment="left">
+    </div>
+  <body>
+</html>
+                        <button type="button" id="skipAuthBtn2" class="w-full text-indigo-600 hover:text-indigo-700 font-medium py-2 rounded-xl transition-colors duration-300 dark:text-indigo-400 dark:hover:text-indigo-300">
+                            Skip for now
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Welcome Popup -->
+    <div id="welcomePopup" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 hidden">
+        <div class="popup-center bg-white dark:bg-gray-800 rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <h2 class="text-3xl font-bold text-center mb-6 text-indigo-600 dark:text-indigo-400">Welcome to Snapwords!</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select Game Mode</label>
+                    <select id="gameModeSelect" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                        <option value="timed">Timed Mode</option>
+                        <option value="endless">Endless Mode</option>
+                    </select>
+                </div>
+                <div id="timeOptions">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Game Duration (minutes)</label>
+                    <select id="timeSelect" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                        <option value="1">1 minute</option>
+                        <option value="3">3 minutes</option>
+                        <option value="5" selected>5 minutes</option>
+                        <option value="10">10 minutes</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Number of Letters</label>
+                    <select id="letterCountSelect" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                        <option value="4">4 letters</option>
+                        <option value="6">6 letters</option>
+                        <option value="8" selected>8 letters</option>
+                        <option value="10">10 letters</option>
+                        <option value="12">12 letters</option>
+                        <option value="15">15 letters</option>
+                    </select>
+                </div>
+            </div>
+            <button id="startGameBtn" class="btn-pop mt-6 w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold transition-colors">
+               Start Game!
+            </button>
+        </div>
+    </div>
+   
+    <!-- Sign-in Modal -->
+    <div id="signinModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <h2 class="text-3xl font-bold text-center mb-6 text-indigo-600 dark:text-indigo-400">Sign In</h2>
+            <p class="text-center mb-6 dark:text-gray-300">This feature is coming soon! For now, your progress will be saved locally.</p>
+            <button id="closeSigninBtn" class="btn-pop mt-2 w-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-white py-3 rounded-lg font-bold transition-colors">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settingsPanel" class="fixed top-20 right-4 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl z-40 hidden settings-panel p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold text-gray-800 dark:text-white">Settings</h3>
+            <button id="closeSettingsBtn" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+        
+        <div class="space-y-6">
+            
+            <!-- Theme Settings -->
+            <div>
+                <h4 class="font-medium text-gray-900 dark:text-white mb-3 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+                    </svg>
+                    Settings
+                </h4>
+                <div class="space-y-3 pl-7">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Dark Mode</span>
+                        <div class="relative inline-block w-10 mr-2 align-middle select-none">
+                            <input type="checkbox" id="darkModeToggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                            <label for="darkModeToggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Background</label>
+                        <select id="themeSettingSelect" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                            <option value="default">Default</option>
+                            <option value="ocean">Ocean</option>
+                            <option value="forest">Forest</option>
+                            <option value="pink">Pink</option>
+                            <option value="purple">Purple</option>
+                            <option value="gradient">Gradient</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+        
+        <button id="saveSettingsBtn" class="btn-pop mt-6 w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold transition-colors">
+         Save Changes
+        </button>
+    </div>
+
+    <!-- Profile Popup -->
+    <div id="profilePopup" class="fixed top-20 right-4 w-72 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl z-40 hidden settings-panel p-5">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-white">Account</h3>
+            <button id="closeProfileBtn" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+        
+        <div class="flex items-center space-x-3 mb-5">
+            <div class="bg-indigo-600 bg-opacity-20 dark:bg-indigo-400 dark:bg-opacity-20 rounded-full w-10 h-10 flex items-center justify-center">
+                <span class="text-indigo-600 dark:text-indigo-300 text-sm font-bold avatar-initial">U</span>
+            </div>
+            <div>
+                <p id="profileName" class="text-sm font-semibold text-gray-800 dark:text-white truncate max-w-[180px]">User Name</p>
+                <p id="profileEmail" class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px]">user@example.com</p>
+            </div>
+        </div>
+        
+        <div class="space-y-2 mb-4">
+            <button id="changePasswordBtn" class="w-full flex items-center justify-between py-2 px-3 rounded-xl text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                <div class="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                    </svg>
+                    Change Password
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+            </button>
+        </div>
+        
+        <button id="signOutBtn" class="w-full text-sm font-medium py-2.5 px-4 rounded-xl bg-red-500 bg-opacity-10 hover:bg-opacity-20 text-red-600 dark:text-red-400 transition-colors flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sign Out
+        </button>
+    </div>
+
+    <!-- Game Container -->
+    <div class="container mx-auto px-4 py-8 flex-1 flex flex-col">
+        <!-- Header with Dark Mode Toggle -->
+        <header class="flex justify-between items-center mb-8">
+            <div class="header-center">
+                <h1 class="text-4xl font-bold text-white drop-shadow-lg header-text">Snapwords</h1>
+            </div>
+            <div class="flex space-x-4">
+                <button id="darkModeToggleBtn" class="dark-mode-toggle p-2 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors">
+                    <svg id="darkModeIcon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                </button>
+                <button id="settingsBtn" class="btn-pop p-2 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.1.06.204.11.31.15 1.497.459 2.286 2.06 1.807 3.557z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v3m0 0h3m-3 0h-3" />
+                    </svg>
+                </button>
+                <button id="signinBtn" class="btn-pop p-2 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Game Info -->
+        <div class="flex justify-between items-center mb-6">
+            <div class="flex items-center space-x-4">
+                <div class="glass-effect dark:glass-effect-dark rounded-lg p-3 score-display">
+                    <p class="text-sm text-white dark:text-gray-200">Score</p>
+                    <p id="scoreDisplay" class="text-2xl font-bold text-white dark:text-white">0</p>
+                </div>
+                <div id="timerContainer" class="glass-effect dark:glass-effect-dark rounded-lg p-3 score-display">
+                    <p class="text-sm text-white dark:text-gray-200">Time</p>
+                    <p id="timerDisplay" class="text-2xl font-bold text-white dark:text-white">05:00</p>
+                </div>
+                <div class="glass-effect dark:glass-effect-dark rounded-lg p-3 score-display">
+                    <p class="text-sm text-white dark:text-gray-200">Words</p>
+                    <p id="wordCounter" class="text-2xl font-bold text-white dark:text-white">0</p>
+                </div>
+            </div>
+            <div id="leaderboardBtn" class="btn-pop glass-effect dark:glass-effect-dark rounded-lg p-3 cursor-pointer hover:bg-opacity-30 transition-colors score-display">
+                <p class="text-sm text-white dark:text-gray-200">Leaderboard</p>
+                <div class="flex items-center">
+                    <p class="text-xl font-bold text-white dark:text-white">Top Scores</p>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white dark:text-white ml-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modern Leaderboard -->
+        <div id="leaderboard" class="glass-effect dark:glass-effect-dark rounded-2xl p-6 mb-6 hidden game-area">
+            <h3 class="text-xl font-bold text-white dark:text-white mb-4 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                </svg>
+                Top Players
+            </h3>
+            <div class="space-y-3" id="leaderboardEntries">
+                <!-- Leaderboard entries will be added here -->
+            </div>
+        </div>
+
+        <!-- Notification Area -->
+        <div id="notificationArea" class="fixed top-4 left-0 right-0 flex justify-center z-40 pointer-events-none">
+            <!-- Notifications will appear here -->
+        </div>
+
+        <!-- Game Area -->
+        <div class="flex-1 flex flex-col md:flex-row gap-6">
+            <!-- Letter Tiles -->
+            <div class="md:w-1/2 glass-effect dark:glass-effect-dark rounded-2xl p-6 game-area">
+                <h2 class="text-xl font-bold text-white dark:text-white mb-4">Letter Tiles</h2>
+                <div id="letterTiles" class="flex flex-wrap gap-3">
+                    <!-- Letter tiles will be added here by JavaScript -->
+                </div>
+                <div class="mt-6 flex justify-between">
+                    <button id="shuffleBtn" class="btn-pop glass-effect dark:glass-effect-dark hover:bg-opacity-40 text-white dark:text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Shuffle
+                    </button>
+                    <button id="hintBtn" class="btn-pop glass-effect dark:glass-effect-dark hover:bg-opacity-40 text-white dark:text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Hint
+                    </button>
+                    <button id="newLettersBtn" class="btn-pop glass-effect dark:glass-effect-dark hover:bg-opacity-40 text-white dark:text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        New Letters
+                    </button>
+                </div>
+                
+                <!-- Modern Leaderboard Below Letters -->
+                <div class="mt-8 glass-effect dark:glass-effect-dark rounded-2xl p-4">
+                    <h3 class="text-lg font-bold text-white dark:text-white mb-3 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        Quick Stats
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-purple-800 bg-opacity-30 dark:bg-purple-900 dark:bg-opacity-50 rounded-lg p-2">
+                            <p class="text-xs text-purple-200 dark:text-purple-100">Longest Word</p>
+                            <p id="longestWord" class="text-lg font-bold text-white dark:text-white">-</p>
+                        </div>
+                        <div class="bg-purple-800 bg-opacity-30 dark:bg-purple-900 dark:bg-opacity-50 rounded-lg p-2">
+                            <p class="text-xs text-purple-200 dark:text-purple-100">Highest Score</p>
+                            <p id="highestScoreWord" class="text-lg font-bold text-white dark:text-white">-</p>
+                        </div>
+                        <div class="bg-purple-800 bg-opacity-30 dark:bg-purple-900 dark:bg-opacity-50 rounded-lg p-2">
+                            <p class="text-xs text-purple-200 dark:text-purple-100">Words Found</p>
+                            <p id="wordsFound" class="text-lg font-bold text-white dark:text-white">0</p>
+                        </div>
+                        <div class="bg-purple-800 bg-opacity-30 dark:bg-purple-900 dark:bg-opacity-50 rounded-lg p-2">
+                            <p class="text-xs text-purple-200 dark:text-purple-100">Avg. Length</p>
+                            <p id="avgWordLength" class="text-lg font-bold text-white dark:text-white">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Word Formation Area -->
+            <div class="md:w-1/2 glass-effect dark:glass-effect-dark rounded-2xl p-6 flex flex-col game-area">
+                <h2 class="text-xl font-bold text-white dark:text-white mb-4">Form Your Word</h2>
+                <div id="dropArea" class="drop-area flex-1 border-2 border-dashed border-white border-opacity-30 dark:border-opacity-20 rounded-xl p-4 mb-4 flex flex-wrap gap-3 content-start">
+                    <!-- Dropped letters will appear here -->
+                </div>
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm text-white dark:text-gray-200">Current Word Score:</p>
+                        <p id="currentWordScore" class="text-xl font-bold text-white dark:text-white">0</p>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button id="clearBtn" class="btn-pop bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Clear
+                        </button>
+                        <button id="submitBtn" class="btn-pop bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg transition-colors flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Submit
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Import the functions you need from the SDKs you need
+        // TODO: Add SDKs for Firebase products that you want to use
+        // https://firebase.google.com/docs/web/setup#available-libraries
+
+        // Your web app's Firebase configuration
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+          apiKey: "AIzaSyBNlWtUbDII8-rVR_jq2JobCtggwARc8zo",
+          authDomain: "snapwords-8e289.firebaseapp.com",
+          projectId: "snapwords-8e289",
+          storageBucket: "snapwords-8e289.appspot.com",
+          messagingSenderId: "662195051428",
+          appId: "1:662195051428:web:fc1e6fcfb11fe28eedbf31",
+          measurementId: "G-HJTTR65LCF"
+        };
+
+        const app = firebase.initializeApp(firebaseConfig);
+        const analytics = firebase.analytics();
+
+        // Game State
+        const gameState = {
+            score: 0,
+            timeLeft: 300, // 5 minutes in seconds
+            gameMode: 'timed',
+            letterCount: 8,
+            theme: 'default',
+            darkMode: true,
+            font: 'poppins',
+            isPlaying: false,
+            currentLetters: [],
+            currentWord: [],
+            validWords: [],
+            usedWords: [],
+            longestWord: '',
+            highestScoreWord: { word: '', score: 0 }, // Changed to store both word and score
+            wordScores: {
+                '1': 100,
+                '2': 200,
+                '3': 300,
+                '4': 400,
+                '5': 500,
+                '6': 600,
+                '7': 700,
+                '8': 800,
+                '9': 900,
+                '10+': 1000
+            },
+          
+            leaderboard: [
+                { name: 'Alex', score: 1250, avatar: '👑' },
+                { name: 'Jamie', score: 980, avatar: '🌟' },
+                { name: 'Taylor', score: 750, avatar: '⚡' },
+                { name: 'Morgan', score: 620, avatar: '🎯' },
+                { name: 'Casey', score: 580, avatar: '🏆' }
+            ],
+            draggedTile: null
+        };
+
+        // DOM Elements
+        const elements = {
+            authModal: document.getElementById('authModal'),
+            closeAuthModal: document.getElementById('closeAuthModal'),
+            signInTab: document.getElementById('signInTab'),
+            signUpTab: document.getElementById('signUpTab'),
+            signInContent: document.getElementById('signInContent'),
+            signUpContent: document.getElementById('signUpContent'),
+            skipAuthBtn: document.getElementById('skipAuthBtn'),
+            skipAuthBtn2: document.getElementById('skipAuthBtn2'),
+            toggleSignInPassword: document.getElementById('toggleSignInPassword'),
+            toggleSignUpPassword: document.getElementById('toggleSignUpPassword'),
+            signInPassword: document.getElementById('signInPassword'),
+            signUpPassword: document.getElementById('signUpPassword'),
+            welcomePopup: document.getElementById('welcomePopup'),
+            gameModeSelect: document.getElementById('gameModeSelect'),
+            timeSelect: document.getElementById('timeSelect'),
+            timeOptions: document.getElementById('timeOptions'),
+            letterCountSelect: document.getElementById('letterCountSelect'),
+            startGameBtn: document.getElementById('startGameBtn'),
+            signinModal: document.getElementById('signinModal'),
+            closeSigninBtn: document.getElementById('closeSigninBtn'),
+            settingsBtn: document.getElementById('settingsBtn'),
+            darkModeToggleBtn: document.getElementById('darkModeToggleBtn'),
+            darkModeIcon: document.getElementById('darkModeIcon'),
+            darkModeToggle: document.getElementById('darkModeToggle'),
+            signinBtn: document.getElementById('signinBtn'),
+            scoreDisplay: document.getElementById('scoreDisplay'),
+            timerDisplay: document.getElementById('timerDisplay'),
+            timerContainer: document.getElementById('timerContainer'),
+            wordCounter: document.getElementById('wordCounter'),
+            leaderboardBtn: document.getElementById('leaderboardBtn'),
+            leaderboard: document.getElementById('leaderboard'),
+            leaderboardEntries: document.getElementById('leaderboardEntries'),
+            notificationArea: document.getElementById('notificationArea'),
+            letterTiles: document.getElementById('letterTiles'),
+            shuffleBtn: document.getElementById('shuffleBtn'),
+            hintBtn: document.getElementById('hintBtn'),
+            newLettersBtn: document.getElementById('newLettersBtn'),
+            dropArea: document.getElementById('dropArea'),
+            currentWordScore: document.getElementById('currentWordScore'),
+            clearBtn: document.getElementById('clearBtn'),
+            submitBtn: document.getElementById('submitBtn'),
+            longestWord: document.getElementById('longestWord'),
+            highestScoreWord: document.getElementById('highestScoreWord'),
+            wordsFound: document.getElementById('wordsFound'),
+            avgWordLength: document.getElementById('avgWordLength'),
+            settingsPanel: document.getElementById('settingsPanel'),
+            closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+            themeSettingSelect: document.getElementById('themeSettingSelect'),
+            saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+            profilePopup: document.getElementById('profilePopup'),
+            closeProfileBtn: document.getElementById('closeProfileBtn'),
+            changePasswordBtn: document.getElementById('changePasswordBtn'),
+            signOutBtn: document.getElementById('signOutBtn'),
+            profileName: document.getElementById('profileName'),
+            profileEmail: document.getElementById('profileEmail')
+        };
+
+        // Initialize the game
+
+        const backupDictionaryWords = [
+        'apple', 'banana', 'cat', 'dog', 'elephant', 'fish', 'goat', 'house', 'igloo', 'jungle',
+        'kite', 'lemon', 'monkey', 'nest', 'orange', 'pear', 'queen', 'rabbit', 'sun', 'tree',
+        'umbrella', 'violin', 'water', 'xylophone', 'yacht', 'zebra', 'ant', 'bear', 'car', 'door',
+        'egg', 'frog', 'girl', 'hat', 'ice', 'jam', 'king', 'log', 'man', 'net', 'owl', 'pig', 'quick',
+        'red', 'sit', 'top', 'up', 'van', 'win', 'box', 'yes', 'zip',
+        // Add more backup words as needed
+        'about', 'above', 'after', 'again', 'below', 'could', 'every', 'first', 'found', 'great',
+        'house', 'large', 'learn', 'never', 'other', 'place', 'plant', 'point', 'right', 'small',
+        'sound', 'spell', 'still', 'study', 'their', 'there', 'these', 'thing', 'think', 'three',
+        'water', 'where', 'which', 'world', 'would', 'write'
+    ];
+
+    // Dictionary URLs to try (will attempt each until one works)
+    const dictionarySources = [
+        'https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt',
+        'https://raw.githubusercontent.com/redbo/scrabble/master/dictionary.txt',
+        'https://raw.githubusercontent.com/jonbcard/scrabble-bot/master/src/dictionary.txt'
+    ];
+
+    gameState.dictionary = new Set(backupDictionaryWords);
+    gameState.dictionaryLoaded = false;
+    gameState.usingBackupDictionary = true;
+
+        async function initGame() {
+            // Show auth modal first
+            showAuthModal();
+
+            loadDictionary().catch(error => {
+        console.error('Dictionary loading failed completely:', error);
+        gameState.dictionary = new Set(backupDictionaryWords);
+        gameState.dictionaryLoaded = true;
+        gameState.usingBackupDictionary = true;
+    });
+
+        applySavedSettings();
+    
+    // Set up event listeners
+    elements.startGameBtn.addEventListener('click', startGame);
+    elements.closeSigninBtn.addEventListener('click', () => {
+        elements.signinModal.classList.add('hidden');
+    });
+    elements.signinBtn.addEventListener('click', toggleProfilePopup);
+            elements.closeSigninBtn.addEventListener('click', () => {
+        elements.signinModal.classList.add('hidden');
+    });
+
+    // Auth modal events
+    elements.closeAuthModal.addEventListener('click', closeAuthModal);
+    elements.skipAuthBtn.addEventListener('click', closeAuthModal);
+    elements.skipAuthBtn2.addEventListener('click', closeAuthModal);
+    elements.signInTab.addEventListener('click', () => switchAuthTab('signIn'));
+    elements.signUpTab.addEventListener('click', () => switchAuthTab('signUp'));
+    elements.toggleSignInPassword.addEventListener('click', () => togglePasswordVisibility('signIn'));
+    elements.toggleSignUpPassword.addEventListener('click', () => togglePasswordVisibility('signUp'));
+            
+            elements.leaderboardBtn.addEventListener('click', toggleLeaderboard);
+            elements.clearBtn.addEventListener('click', clearCurrentWord);
+            elements.submitBtn.addEventListener('click', submitWord);
+            elements.shuffleBtn.addEventListener('click', shuffleLetters);
+            elements.newLettersBtn.addEventListener('click', generateNewLetters);
+            
+            // Dark mode toggle
+            elements.darkModeToggleBtn.addEventListener('click', toggleDarkMode);
+            if (elements.darkModeToggle) {
+                elements.darkModeToggle.addEventListener('change', toggleDarkMode);
+            }
+            
+            // Settings panel
+            elements.settingsBtn.addEventListener('click', toggleSettings);
+            elements.closeSettingsBtn.addEventListener('click', toggleSettings);
+            elements.saveSettingsBtn.addEventListener('click', saveSettings);
+            elements.gameModeSelect.addEventListener('change', function() {
+    elements.timeOptions.style.display = this.value === 'timed' ? 'block' : 'none';
+});
+            
+            // Profile popup events
+            elements.closeProfileBtn.addEventListener('click', toggleProfilePopup);
+            elements.changePasswordBtn.addEventListener('click', showChangePassword);
+            elements.signOutBtn.addEventListener('click', signOut);
+            
+            // Setup drag and drop
+            setupDragAndDrop();
+            
+            // Render leaderboard
+            renderLeaderboard();
+            
+            // Apply saved settings
+            applySavedSettings();
+        }
+
+        // Show auth modal
+        function showAuthModal() {
+            elements.authModal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        // Close auth modal
+        function closeAuthModal() {
+            elements.authModal.classList.add('hidden');
+            document.body.style.overflow = 'auto';
+            // Show welcome popup after auth modal is closed
+            elements.welcomePopup.classList.remove('hidden');
+        }
+
+        // Switch between sign in and sign up tabs
+function switchAuthTab(tab) {
+    if (tab === 'signIn') {
+        // Update tabs
+        elements.signInTab.classList.remove('tab-inactive');
+        elements.signInTab.classList.add('tab-active');
+        elements.signUpTab.classList.remove('tab-active');
+        elements.signUpTab.classList.add('tab-inactive');
+        
+        // Update forms
+        elements.signInContent.classList.add('active');
+        elements.signInContent.classList.remove('inactive-left');
+        elements.signUpContent.classList.remove('active');
+        elements.signUpContent.classL... (27 KB left)
